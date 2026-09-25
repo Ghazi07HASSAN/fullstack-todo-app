@@ -14,6 +14,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(express.json());
 
 app.get('/', (req, res) => {
@@ -21,83 +22,80 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 🔑 AUTHENTICATION ROUTES (REGISTER & LOGIN)
+// 🔑 AUTHENTICATION ROUTES
 // ==========================================
 
-// 1. User Register
-app.post('/api/auth/register', async (req, res) => {
+const handleRegister = async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email aur Password zaroori hain' });
 
-    // Check if user already exists
     const userExist = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (userExist.rows.length > 0) {
       return res.status(400).json({ error: 'Is email par already account bana hua hai' });
     }
 
-    // Hash Password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Save User to DB
     const newUser = await pool.query(
       'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email',
       [email, hashedPassword]
     );
 
-    // Generate JWT Token
     const token = jwt.sign(
       { id: newUser.rows[0].id, email: newUser.rows[0].email },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'secretkey',
       { expiresIn: '7d' }
     );
 
     res.json({ token, user: newUser.rows[0] });
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error: ' + err.message });
   }
-});
+};
 
-// 2. User Login
-app.post('/api/auth/login', async (req, res) => {
+const handleLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email aur Password fill karein' });
 
-    // Find User
     const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (user.rows.length === 0) {
       return res.status(400).json({ error: 'Ghalat Email ya Password' });
     }
 
-    // Verify Password
     const validPassword = await bcrypt.compare(password, user.rows[0].password);
     if (!validPassword) {
       return res.status(400).json({ error: 'Ghalat Email ya Password' });
     }
 
-    // Generate JWT Token
     const token = jwt.sign(
       { id: user.rows[0].id, email: user.rows[0].email },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'secretkey',
       { expiresIn: '7d' }
     );
 
     res.json({ token, user: { id: user.rows[0].id, email: user.rows[0].email } });
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: 'Server Error: ' + err.message });
   }
-});
+};
+
+// Donoh path variations handle karein
+app.post('/api/auth/register', handleRegister);
+app.post('/auth/register', handleRegister);
+
+app.post('/api/auth/login', handleLogin);
+app.post('/auth/login', handleLogin);
 
 // ==========================================
-// 📝 PROTECTED TODO ROUTES (LOGGED IN USERS)
+// 📝 PROTECTED TODO ROUTES
 // ==========================================
 
-// 1. GET ALL TODOS FOR LOGGED IN USER
-app.get('/api/todos', authenticateToken, async (req, res) => {
+const getTodos = async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM todos WHERE user_id = $1 ORDER BY id DESC',
@@ -106,12 +104,11 @@ app.get('/api/todos', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: err.message });
   }
-});
+};
 
-// 2. ADD A TODO
-app.post('/api/todos', authenticateToken, async (req, res) => {
+const createTodo = async (req, res) => {
   try {
     const { title } = req.body;
     if (!title) return res.status(400).json({ error: 'Title required hai' });
@@ -123,12 +120,11 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
     res.json(newTodo.rows[0]);
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: err.message });
   }
-});
+};
 
-// 3. UPDATE A TODO
-app.put('/api/todos/:id', authenticateToken, async (req, res) => {
+const updateTodo = async (req, res) => {
   try {
     const { id } = req.params;
     const { title, completed } = req.body;
@@ -141,23 +137,37 @@ app.put('/api/todos/:id', authenticateToken, async (req, res) => {
     res.json(updatedTodo.rows[0]);
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: err.message });
   }
-});
+};
 
-// 4. DELETE A TODO
-app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
+const deleteTodo = async (req, res) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM todos WHERE id = $1 AND user_id = $2', [id, req.user.id]);
     res.json({ message: 'Todo delete ho gaya!' });
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server Error');
+    res.status(500).json({ error: err.message });
   }
-});
+};
+
+app.get('/api/todos', authenticateToken, getTodos);
+app.get('/todos', authenticateToken, getTodos);
+
+app.post('/api/todos', authenticateToken, createTodo);
+app.post('/todos', authenticateToken, createTodo);
+
+app.put('/api/todos/:id', authenticateToken, updateTodo);
+app.put('/todos/:id', authenticateToken, updateTodo);
+
+app.delete('/api/todos/:id', authenticateToken, deleteTodo);
+app.delete('/todos/:id', authenticateToken, deleteTodo);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Auth Server running on: http://localhost:${PORT}`);
 });
+
+// Vercel Serverless Function export
+module.exports = app;

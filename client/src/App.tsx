@@ -4,7 +4,7 @@ import axios from 'axios';
 import type { Todo, User, FilterType } from './types';
 import './index.css';
 
-const API_BASE = 'https://fullstack-todo-backend-drab.vercel.app';
+const API_BASE = 'https://fullstack-todo-backend-drab.vercel.app/api';
 
 export default function App() {
   // Auth States
